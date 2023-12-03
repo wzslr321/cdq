@@ -15,7 +15,7 @@ Let's say you have a following structure
 If you want to quickly go to foobar directory to edit something there, you do not need to type the entire path with 
 `cd foo/bar/foobar`. With **cdq** you simply can run `cdq foobar`!
 
-> Note: It is an incredibly basic MVP, but I plan to make it better every time I have some time to spare.
+> Note: It is an incredibly basic MVP - writing this README took me more time than to write the current code -, but I plan to make it better every time I have some time to spare.
 
 ### Installation
 
