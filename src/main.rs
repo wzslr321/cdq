@@ -11,7 +11,7 @@ fn main() {
     let args = Args::parse();
 
     let dir_name = args.name;
-    for entry in WalkDir::new("foo") {
+    for entry in WalkDir::new(".") {
         let entry = entry.unwrap();
         let path = entry.path();
         if let Some(last_component) = path.file_name() {
