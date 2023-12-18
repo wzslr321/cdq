@@ -12,6 +12,11 @@ mod cdq {
     };
 
     const CDQ_CONFIG_NAME: &'static str = "cdq.config";
+    const SHELL_ENV_NAME: &'static str = "SHELL";
+    const SHELL_TYPE_TO_FILE: &[(ShellType, &str)] = &[
+        (ShellType::Zsh, ".zshrc"),
+        // add other shell types here...
+    ];
 
     pub enum Logger {}
 
@@ -29,6 +34,9 @@ mod cdq {
         pub fn debug(msg: &str) {
             println!("{} {}", "[CDQ | Debug]:".green(), msg);
         }
+        pub fn query(msg: &str) {
+            println!("{} {}", "[CDQ | Query]:".bright_green(), msg);
+        }
     }
     pub struct Config {
         shell: Shell,
@@ -42,6 +50,7 @@ mod cdq {
         }
     }
 
+    #[derive(PartialEq)]
     enum ShellType {
         Bash,
         Fish,
@@ -78,27 +87,57 @@ mod cdq {
                 self.name,
                 self.path.display()
             );
-            write!(f, "{}", stringified) 
+            write!(f, "{}", stringified)
         }
     }
 
     fn ask_for_shell_config_path(detected_shell: &Option<ShellType>) -> io::Result<path::PathBuf> {
         match detected_shell {
-            Some(shell_type) => println!("Detected shell: {}", shell_type),
-            None => println!("Failed to detect shell"),
-        };
-        println!("Type path to your shell config file");
-
-        let mut path = String::new();
-        io::stdin().read_line(&mut path)?;
-
-        Ok(path::Path::new(&path).to_path_buf())
+            Some(shell_type) => {
+                Logger::info(&format!("Detected shell: {}", shell_type));
+                let mut default_config_file_path = home::home_dir().unwrap().as_os_str().to_owned();
+                default_config_file_path.push(format!(
+                    "/{}",
+                    SHELL_TYPE_TO_FILE
+                        .iter()
+                        .find_map(|(st, file)| {
+                            if *st == *shell_type {
+                                Some(*file)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap()
+                ));
+                Logger::info(&format!(
+                    "Default config file for {} is: {}",
+                    shell_type,
+                    default_config_file_path.clone().into_string().unwrap()
+                ));
+                println!("Proceed? [Type Y/n]:");
+                let mut ans = String::new();
+                io::stdin().read_line(&mut ans)?;
+                if ans.trim() == "Y" {
+                    Ok(
+                        path::Path::new(&default_config_file_path.into_string().unwrap())
+                            .to_path_buf(),
+                    )
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Aborting due to invalid input...",
+                    ))
+                }
+            }
+            None => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Aborting due to invalid shell...",
+            )),
+        }
     }
 
     fn detect_shell_type() -> Option<ShellType> {
-        let shell_env_name = "SHELL";
-
-        match env::var(shell_env_name) {
+        match env::var(SHELL_ENV_NAME) {
             Ok(value) => match value.split('/').last().unwrap_or_else(|| "unknown") {
                 "zsh" => Some(ShellType::Zsh),
                 "bash" => Some(ShellType::Bash),
@@ -111,7 +150,10 @@ mod cdq {
 
     fn get_user_shell() -> Shell {
         let shell_type = detect_shell_type();
-        let shell_config_path = ask_for_shell_config_path(&shell_type);
+        let mut shell_config_path = ask_for_shell_config_path(&shell_type);
+        while shell_config_path.is_err() {
+            shell_config_path = ask_for_shell_config_path(&shell_type);
+        }
 
         Shell::new(
             shell_type.unwrap_or_else(|| ShellType::Other),
@@ -154,11 +196,11 @@ mod cdq {
             None => {
                 Logger::info("It appears that you are running CDQ for the first time");
                 let user_shell = get_user_shell();
-                println!(
+                Logger::info(&format!(
                     "Detected shell: {}, with config file at: {}",
                     user_shell.name,
                     user_shell.path.display()
-                );
+                ));
             }
         }
     }
@@ -181,7 +223,7 @@ fn main() {
         let path = entry.path();
         if let Some(last_component) = path.file_name() {
             if last_component.to_str().unwrap() == dir_name {
-                println!("found {}. Path={}", dir_name, path.display());
+                cdq::Logger::query(&format!("{}", path.display()));
             }
         }
     }
