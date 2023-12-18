@@ -4,6 +4,7 @@ use walkdir::WalkDir;
 mod cdq {
     use colored::Colorize;
     use core::fmt;
+    use std::io::prelude::*;
     use std::{
         env::{self},
         fs,
@@ -17,6 +18,18 @@ mod cdq {
         (ShellType::Zsh, ".zshrc"),
         // add other shell types here...
     ];
+
+    const CDQ_FUNC_EXECUTOR_ZSH: &'static str = r#"
+            cdq() {
+                local output=$(~/Remi/rust/cdq/target/release/cdq $1)
+                echo $output
+                local dir=$(echo $output | awk -F'Path=' '{print $2}')
+                if [ -d "$dir" ]; then
+                    echo "Proceeding to the $dir"
+                    cd "$dir"
+                fi
+            }
+        "#;
 
     pub enum Logger {}
 
@@ -117,7 +130,7 @@ mod cdq {
                 println!("Proceed? [Type Y/n]:");
                 let mut ans = String::new();
                 io::stdin().read_line(&mut ans)?;
-                if ans.trim() == "Y" {
+                if ans.trim() == "Y".to_lowercase() {
                     Ok(
                         path::Path::new(&default_config_file_path.into_string().unwrap())
                             .to_path_buf(),
@@ -178,7 +191,20 @@ mod cdq {
         }
     }
 
-    pub fn setup() {
+    fn try_write_to_shell_config(path: PathBuf) -> io::Result<()> {
+        let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+        if let Err(e) = writeln!(file, "{}", CDQ_FUNC_EXECUTOR_ZSH) {
+            Logger::error(&format!("Couldn't write to file: {}", e));
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Aborting due to invalid input...",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn setup() -> io::Result<()> {
         let home_path = home::home_dir();
         if home_path.is_none() {
             Logger::warn("Failed to retrieve HOME directory");
@@ -192,6 +218,7 @@ mod cdq {
                 let path = String::from(&path_to_cdq.clone().into_string().unwrap());
                 Logger::debug(&format!("Found config at: {}", &path));
                 Logger::debug(&format!("Shell Config:\n{}", config.shell));
+                Ok(())
             }
             None => {
                 Logger::info("It appears that you are running CDQ for the first time");
@@ -201,6 +228,24 @@ mod cdq {
                     user_shell.name,
                     user_shell.path.display()
                 ));
+                Logger::info(&format!(
+                    "CDQ wants to write following lines:{}",
+                    CDQ_FUNC_EXECUTOR_ZSH
+                ));
+                println!("Proceed? [Type Y/n]:");
+                let mut ans = String::new();
+                io::stdin().read_line(&mut ans)?;
+                if ans.trim() == "Y".to_lowercase() {
+                    if let Err(e) = try_write_to_shell_config(user_shell.path) {
+                        return Err(e);
+                    }
+                    Ok(())
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Aborting due to invalid input...",
+                    ))
+                }
             }
         }
     }
@@ -215,7 +260,10 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    cdq::setup();
+    match cdq::setup() {
+        Ok(_) => cdq::Logger::info("Setup finished correctly"),
+        Err(_) => cdq::Logger::error("Setup failed"),
+    };
 
     let dir_name = args.name;
     for entry in WalkDir::new(".") {
