@@ -1,7 +1,10 @@
-use std::io;
+use std::io::{self};
 
+use cdq::Cache;
 use clap::Parser;
 use walkdir::WalkDir;
+
+const CDQ_CACHE_FILE_NAME: &'static str = ".cdq.cache";
 
 /// Handles setup of shell-specific functions
 /// Exposes Logger
@@ -17,7 +20,7 @@ mod cdq {
     };
 
     // TODO  Try to move these consts somewhere as it looks disgusting
-    const CDQ_CONFIG_NAME: &'static str = ".cdq.config";
+    const CDQ_CONFIG_FILE_NAME: &'static str = ".cdq.config";
     const SHELL_ENV_NAME: &'static str = "SHELL";
     const SHELL_TYPE_TO_FILE: &[(ShellType, &str)] = &[
         (ShellType::Zsh, ".zshrc"),       // ~/.zshrc
@@ -44,6 +47,27 @@ mod cdq {
         shell: Shell,
     }
 
+    pub struct Cache<'a> {
+        path: &'a str,
+    }
+
+    impl<'a> Cache<'a> {
+        pub fn new(path: &'a str) -> Self {
+            Self { path }
+        }
+
+        pub fn push(&self, _pattern: &str) {
+            let _file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(true)
+                .open(self.path)
+                .unwrap();
+        }
+        pub fn try_pop() {}
+        pub fn try_pop_until() {}
+    }
+
     /// Retrieves **cdq** config from its config file, if it exists
     /// Configures it and saves the configuration to the config file otherwise.
     ///
@@ -65,7 +89,7 @@ mod cdq {
             Logger::warn("Failed to retrieve HOME directory");
         }
         let mut path_to_cdq = home_path.unwrap().as_os_str().to_owned();
-        path_to_cdq.push(format!("/.config/{}", CDQ_CONFIG_NAME));
+        path_to_cdq.push(format!("/.config/{}", CDQ_CONFIG_FILE_NAME));
         let user_config = try_read_user_config(path_to_cdq.clone().into());
 
         match user_config {
@@ -414,27 +438,51 @@ struct Args {
     /// Makes **cdq** do nothing if it is first time running it
     /// in the current session.
     #[arg(short, long)]
-    back: bool,
+    back: Option<bool>,
+
+    #[arg(short, long)]
+    back_until: Option<String>,
 }
 
 enum Command {
     ChangeForward,
     ChangeBackwards,
+    ChangeBackwardsUntil,
 }
 
-fn change_forward(pattern: Option<&str>) {
-    for entry in WalkDir::new(".") {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if let Some(last_component) = path.file_name() {
-            if last_component.to_str().unwrap() == pattern.unwrap() {
-                cdq::Logger::query(&format!("{}", path.display()));
-            }
+fn ensure_arg_or_terminate<T>(arg: Option<T>, arg_name: &str) -> T {
+    match arg {
+        Some(value) => value,
+        None => {
+            cdq::Logger::error(&format!("Missing argument value for: {}", arg_name));
+            std::process::exit(0)
         }
     }
 }
 
-fn change_backwards() {}
+fn change_forward(pattern_arg: Option<&str>, cache: &Cache) {
+    let pattern = ensure_arg_or_terminate(pattern_arg, "pattern");
+
+    for entry in WalkDir::new(".") {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if let Some(last_component) = path.file_name() {
+            if last_component.to_str().unwrap() == pattern {
+                cdq::Logger::query(&format!("{}", path.display()));
+            }
+        }
+    }
+
+    cache.push(pattern);
+}
+
+fn change_backwards() {
+    cdq::Cache::try_pop()
+}
+
+fn change_backwards_until() {
+    cdq::Cache::try_pop_until()
+}
 
 fn main() -> io::Result<()> {
     let args = Args::parse();
@@ -447,15 +495,20 @@ fn main() -> io::Result<()> {
         }
     };
 
-    let command = if args.back {
+    let command = if args.back.is_some() {
         Command::ChangeBackwards
+    } else if args.back_until.is_some() {
+        Command::ChangeBackwardsUntil
     } else {
         Command::ChangeForward
     };
 
+    let cache = cdq::Cache::new(CDQ_CACHE_FILE_NAME);
+
     match command {
-        Command::ChangeForward => change_forward(args.pattern.as_deref()),
+        Command::ChangeForward => change_forward(args.pattern.as_deref(), &cache),
         Command::ChangeBackwards => change_backwards(),
+        Command::ChangeBackwardsUntil => change_backwards_until(),
     }
 
     Ok(())
